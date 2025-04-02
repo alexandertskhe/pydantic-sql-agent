@@ -1,9 +1,9 @@
 import json
 import csv
 import os
-from typing import Optional
-import time
 import re
+import time
+from typing import Optional, Tuple
 
 # Directory to store CSV exports - shared with the FastAPI server
 EXPORT_DIR = "csv_exports"

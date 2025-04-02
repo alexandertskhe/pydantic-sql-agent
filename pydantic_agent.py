@@ -9,9 +9,9 @@ from pydantic_ai.usage import UsageLimits
 
 # Import local tools and utils
 from tools.sqlite_async import list_tables_names, describe_table, run_sql_query
-from tools.csv_export import query_to_csv_file
+from tools.export_tool import query_to_csv_file
 from tools.knowledge_graph import use_knowledge_graph
-from utils.markdown import to_markdown
+from tools.llm_query_enhancer import llm_enhance_query_for_export
 
 # Import model
 from llm_model import model_openai
@@ -63,41 +63,38 @@ def create_sql_agent():
         * Getting representative column values
         * Generating SQL suggestions for complex queries
         
-        - Use the list_tables_tool and describe_table_tool:
-        * When you need to verify table existence or schema
-        * When knowledge graph information is insufficient
-        
         INSTRUCTIONS:
         1. For most queries, use the knowledge_graph_tool first with "info" action to explore relevant tables.
         2. For complex queries requiring joins, use knowledge_graph_tool with "path" action to determine optimal join paths.
         3. When you need sample column values, use knowledge_graph_tool with "samples" action.
         4. For complex multi-table queries, use knowledge_graph_tool with "suggest" action to get recommended SQL.
-        5. Only fall back to list_tables_tool and describe_table_tool when knowledge graph doesn't provide sufficient information.
-        6. Always use the run_sql_query_tool to execute your final SQL query.
-        7. If the user asks for data export, CSV, or downloadable results, use the export_to_csv_tool and provide the download URL.
-        8. When searching for airports use AIRPORT IATA instead of AIRPORT_NAME. ALSO provice AIRPORT_HUB_ID. Do not provide AIPORT_NAME in answer, only IATA and HUB_ID.
+        5. Always use the run_sql_query_tool to execute your final SQL query.
+        6. If the user asks for data export, CSV, or downloadable results, use the export_to_csv_tool and provide the download URL.
+        7. When searching for airports use AIRPORT IATA instead of AIRPORT_NAME. ALSO provice AIRPORT_HUB_ID. Do not provide AIPORT_NAME in answer, only IATA and HUB_ID.
 
         QUERY CONSTRUCTION BEST PRACTICES:
         - Pay attention to case sensitivity when constructing queries - match the exact column names.
         - DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
         - For complex joins, get relationship information about primary and foreign keys from the knowledge graph.
+        - When joining tables with one-to-many relationships (like sis_airports to sis_wan), always use DISTINCT to avoid duplicate entries. An airport may have multiple WAN devices, so queries joining these tables should use DISTINCT for airport data.
+        - For aggregation queries (COUNT, SUM, etc.), make sure to use appropriate GROUP BY clauses.
         - When user mentions "download", "export", "extract", or "CSV", always generate a CSV file.
         - Present download links clearly so users can access their data.
         """
 
     ########## Tools ##########
-    @agent_sql.tool(retries=10)
-    async def list_tables_tool(ctx: RunContext) -> str:
-        print('list_tables tool invoked')
-        """Use this tool to get a list of all tables in the database."""
-        database_tables = await list_tables_names(ctx.deps.db)
-        return f"Database tables: {to_markdown(database_tables)}"
+    # @agent_sql.tool(retries=10)
+    # async def list_tables_tool(ctx: RunContext) -> str:
+    #     print('list_tables tool invoked')
+    #     """Use this tool to get a list of all tables in the database."""
+    #     database_tables = await list_tables_names(ctx.deps.db)
+    #     return f"Database tables: {to_markdown(database_tables)}"
 
-    @agent_sql.tool(retries=10)
-    async def describe_table_tool(ctx: RunContext, table_name: str) -> str:
-        print('describe_table tool invoked')
-        """Use this tool to get a description of a table in the database."""
-        return await describe_table(ctx.deps.db, table_name)
+    # @agent_sql.tool(retries=10)
+    # async def describe_table_tool(ctx: RunContext, table_name: str) -> str:
+    #     print('describe_table tool invoked')
+    #     """Use this tool to get a description of a table in the database."""
+    #     return await describe_table(ctx.deps.db, table_name)
 
     @agent_sql.tool(retries=10)
     async def run_sql_query_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = 10) -> str:
@@ -106,19 +103,37 @@ def create_sql_agent():
         If an error is returned, rewrite the query, check the query, and try again."""
         return await run_sql_query(ctx.deps.db, sql_query, limit)
 
+
     @agent_sql.tool(retries=3)
     async def export_to_csv_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = None) -> str:
         print('export_to_csv tool invoked')
         """Use this tool to generate a CSV export from a SQL query.
         This tool will run the query, save results as a CSV file, and provide a download URL.
         
+        IMPORTANT: When exporting data, ensure your query includes more comprehensive columns 
+        than just the minimum. Include identifying fields, status fields, and other relevant
+        data to make the export more useful.
+        
         Args:
-            sql_query: The SQL query to run and export results from
+            sql_query: The SQL query to run and export results from. Should include comprehensive columns.
             limit: Optional limit on number of rows (defaults to all rows)
         
         Returns:
             Information about the generated CSV file including the download URL
         """
+
+        # Check if the query needs enhancement for export
+        try:
+            # Pass the knowledge graph to the enhancer function
+            enhanced_query = await llm_enhance_query_for_export(ctx.deps.db, sql_query, kg=ctx.deps.kg)
+            if enhanced_query != sql_query:
+                print(f"Original query: {sql_query}")
+                print(f"Enhanced query: {enhanced_query}")
+                sql_query = enhanced_query
+        except Exception as e:
+            print(f"Error enhancing query: {e}")
+            # Continue with original query if enhancement fails
+        
         # Generate the CSV file and get the download URL
         filename, download_url, row_count = await query_to_csv_file(ctx.deps.db, sql_query, limit)
         
