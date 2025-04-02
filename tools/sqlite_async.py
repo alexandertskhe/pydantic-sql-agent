@@ -57,8 +57,12 @@ async def run_sql_query(db, sql_query: str, limit: int = 10) -> str:
         cursor = await db.execute(sql_query)
         rows = await cursor.fetchmany(limit) if limit else await cursor.fetchall()
         print(f'Used sql_query: {sql_query}')
-        return json.dumps([dict(zip([desc[0] for desc in cursor.description], row)) for row in rows])
+        print(f'Query returned {len(rows)} rows: {rows}')
+        result = [dict(zip([desc[0] for desc in cursor.description], row)) for row in rows]
+        print(f'Formatted result: {result}')
+        return json.dumps(result)
     except Exception as e:
+        print(f'SQL Error: {e}')
         return f"Error: {e}"
     
 

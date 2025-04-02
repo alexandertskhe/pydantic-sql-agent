@@ -43,7 +43,7 @@ async def on_chat_start():
     print(f"Knowledge graph initialized from {db_path}")
     
     # Add a loading message for the user
-    await cl.Message(content="Database knowledge graph loaded. I'm ready to help with your SQL queries!").send()
+    # await cl.Message(content="Database knowledge graph loaded. I'm ready to help with your SQL queries!").send()
 
 @cl.set_starters
 async def set_starters():

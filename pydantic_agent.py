@@ -75,6 +75,7 @@ def create_sql_agent():
         5. Only fall back to list_tables_tool and describe_table_tool when knowledge graph doesn't provide sufficient information.
         6. Always use the run_sql_query_tool to execute your final SQL query.
         7. If the user asks for data export, CSV, or downloadable results, use the export_to_csv_tool and provide the download URL.
+        8. When searching for airports use AIRPORT IATA instead of AIRPORT_NAME. ALSO provice AIRPORT_HUB_ID. Do not provide AIPORT_NAME in answer, only IATA and HUB_ID.
 
         QUERY CONSTRUCTION BEST PRACTICES:
         - Pay attention to case sensitivity when constructing queries - match the exact column names.
@@ -99,7 +100,7 @@ def create_sql_agent():
         return await describe_table(ctx.deps.db, table_name)
 
     @agent_sql.tool(retries=10)
-    async def run_sql_query_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = 5) -> str:
+    async def run_sql_query_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = 10) -> str:
         print('run_sql_query tool invoked')
         """Use this tool to run a SQL query on the database. Double check your query before executing it. 
         If an error is returned, rewrite the query, check the query, and try again."""
