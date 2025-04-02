@@ -17,6 +17,7 @@ data
 public
 sqlite_db/sqlite.db
 sqlite_db/sqlite_graph.json
+sqlite_db/sqlite_query.ipynb
 
 .db
 llm_model/__pycache__

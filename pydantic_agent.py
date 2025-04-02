@@ -10,6 +10,7 @@ from pydantic_ai.usage import UsageLimits
 # Import local tools and utils
 from tools.sqlite_async import list_tables_names, describe_table, run_sql_query
 from tools.csv_export import query_to_csv_file
+from tools.knowledge_graph import use_knowledge_graph
 from utils.markdown import to_markdown
 
 # Import model
@@ -137,7 +138,6 @@ def create_sql_agent():
 
     @agent_sql.tool(retries=10)
     async def knowledge_graph_tool(ctx: RunContext, action: str, tables: Optional[List[str]] = None, column: Optional[str] = None) -> str:
-        print('knowledge_graph tool invoked')
         """
         Use this tool to get information from the knowledge graph about table relationships and sample data.
         
@@ -149,104 +149,7 @@ def create_sql_agent():
         Returns:
             Information about table relationships, sample data, join paths, or SQL suggestions
         """
-        kg = ctx.deps.kg
-        
-        if not kg.is_initialized:
-            return "Knowledge graph is not initialized."
-            
-        if action == "info" and tables and len(tables) == 1:
-            # Get info about a single table
-            table_info = kg.get_table_info(tables[0])
-            
-            # Format the response to be more readable
-            result = f"### Table: {tables[0]}\n"
-            
-            # Add column information
-            result += "\n#### Columns:\n"
-            for col in table_info.get("columns", []):
-                result += f"- {col['name']} ({col['type']})"
-                if "primary_keys" in table_info and col['name'] in table_info["primary_keys"]:
-                    result += " (PRIMARY KEY)"
-                result += "\n"
-            
-            # Add relationship information
-            if table_info.get("relationships"):
-                result += "\n#### Relationships:\n"
-                for rel in table_info.get("relationships", []):
-                    if "target_table" in rel:
-                        result += f"- References {rel['target_table']} via {rel['from_column']} -> {rel['to_column']}\n"
-                    elif "source_table" in rel:
-                        result += f"- Referenced by {rel['source_table']} via {rel['from_column']} -> {rel['to_column']}\n"
-            
-            # Add sample data if available
-            if "sample_rows" in table_info and table_info["sample_rows"]:
-                result += "\n#### Sample Data (first few rows):\n"
-                # Just include the first 3 rows for readability
-                for i, row in enumerate(table_info["sample_rows"][:3]):
-                    # Format as a simple table row
-                    sample_row = []
-                    # Limit to a few key columns for readability
-                    important_cols = [col for col in row.keys() if col in table_info.get("primary_keys", []) 
-                                    or "NAME" in col or "CODE" in col or "ID" in col][:5]
-                    for col in important_cols:
-                        sample_row.append(f"{col}: {row[col]}")
-                    result += f"Row {i+1}: {', '.join(sample_row)}\n"
-            
-            return result
-            
-        elif action == "samples" and tables and len(tables) == 1 and column:
-            # Get sample values for a specific column
-            column_info = kg.get_column_values(tables[0], column)
-            
-            if "error" in column_info:
-                return column_info["error"]
-                
-            result = f"### Sample values for {tables[0]}.{column}:\n"
-            
-            # Add sample values
-            if "sample_values" in column_info and column_info["sample_values"]:
-                result += "Sample values: " + ", ".join([str(v) for v in column_info["sample_values"]]) + "\n\n"
-            
-            # Add statistics
-            if "statistics" in column_info:
-                stats = column_info["statistics"]
-                result += "Statistics:\n"
-                if "distinct_count" in stats:
-                    result += f"- Distinct values: {stats['distinct_count']}\n"
-                if "min_value" in stats and stats["min_value"] is not None:
-                    result += f"- Minimum value: {stats['min_value']}\n"
-                if "max_value" in stats and stats["max_value"] is not None:
-                    result += f"- Maximum value: {stats['max_value']}\n"
-                
-                # Add common values if available
-                if "common_values" in stats and stats["common_values"]:
-                    result += "- Most common values:\n"
-                    for val in stats["common_values"]:
-                        result += f"  - {val['value']} (appears {val['count']} times)\n"
-            
-            return result
-            
-        elif action == "path" and tables and len(tables) == 2:
-            # Find path between two tables
-            join_path = kg.find_join_path(tables[0], tables[1])
-            if join_path:
-                result = f"### Join path between '{tables[0]}' and '{tables[1]}':\n"
-                for join in join_path:
-                    result += f"- Join {join['from_table']}.{join['from_column']} with {join['to_table']}.{join['to_column']}\n"
-                return result
-            else:
-                return f"No join path found between '{tables[0]}' and '{tables[1]}'."
-                    
-        elif action == "suggest" and tables and len(tables) >= 2:
-            # Suggest SQL query for joining tables
-            sql_query = kg.suggest_sql_query(tables)
-            if sql_query:
-                return f"Suggested SQL query for joining {', '.join(tables)}:\n```sql\n{sql_query}\n```"
-            else:
-                return f"Could not generate SQL suggestion for joining {', '.join(tables)}."
-                    
-        else:
-            return "Invalid action or missing parameters. Valid actions are: 'info', 'path', 'suggest', 'samples'."
+        return await use_knowledge_graph(ctx.deps.kg, action, tables, column)
 
     return agent_sql
 
