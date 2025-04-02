@@ -1,0 +1,23 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+.vscode
+
+__pycache__
+
+_explore
+csv_exports
+data
+public
+sqlite_db/sqlite.db
+sqlite_db/sqlite_graph.json
+
+.db
+llm_model/__pycache__
+utils/__pycache__
