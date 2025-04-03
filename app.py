@@ -57,7 +57,7 @@ async def set_starters():
             icon = "/public/icon_1.png",
             ),
         cl.Starter(
-            label="Show me airports in Europe region with active status",
+            label="Show me airports in EUR region with active status",
             message="Show me airports in EUR region with active status",
             icon = "/public/icon_1.png",
             ),
@@ -81,6 +81,7 @@ async def main(message: cl.Message):
     db = await db_manager.connect()
 
     msg = cl.Message(content="")
+    await msg.send()  # Add this line to send the empty message first
 
     try:
         deps = Dependencies(db=db, kg=kg)  # Include knowledge graph in dependencies
@@ -95,6 +96,7 @@ async def main(message: cl.Message):
         ) as response:
             async for r in response.stream_text(delta=True, debounce_by=0.5):
                 await msg.stream_token(r)
+                await msg.update()  # Update after each token for better responsiveness
         
         message_histories[user_id].extend(response.new_messages())
 
@@ -102,10 +104,8 @@ async def main(message: cl.Message):
         print(message_histories[user_id])
         print('-------------------------')
 
-        await msg.update()
-
     except UsageLimitExceeded as e:
-        msg.update()
+        await msg.update()  # Ensure this is awaited
         print(f'Usage limit exceeded {e}')
     
     finally:
