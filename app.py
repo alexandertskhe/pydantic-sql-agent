@@ -28,13 +28,6 @@ async def on_chat_start():
     
     # Initialize knowledge graph on startup
     db_path = 'sqlite_db/sqlite.db'
-    cache_path = f"{os.path.splitext(db_path)[0]}_graph.json"
-    
-    # Check if cache exists
-    if os.path.exists(cache_path):
-        print(f"Found knowledge graph cache: {cache_path}")
-    else:
-        print(f"No knowledge graph cache found. Will build one at: {cache_path}")
     
     # Initialize the knowledge graph
     kg = DBKnowledgeGraph(db_path)
@@ -60,19 +53,19 @@ async def set_starters():
             ),
         cl.Starter(
             label="Show me airports with their WAN routers",
-            message="Show me airports with their WAN routers",
+            message="Show me top 10 airports with their WAN devices and their characteristics",
             icon = "/public/icon_1.png",
             ),
         cl.Starter(
             label="Show me airports in Europe region with active status",
-            message="Show me airports in Europe region with active status",
+            message="Show me airports in EUR region with active status",
             icon = "/public/icon_1.png",
             ),
-        cl.Starter(
-            label="Provide me with the number of roadmaps by their status",
-            message="Provide me with the number of roadmaps by their status",
-            icon = "/public/icon_1.png",
-            ),
+        # cl.Starter(
+        #     label="Provide me with the number of roadmaps by their status",
+        #     message="Provide me with the number of roadmaps by their status",
+        #     icon = "/public/icon_1.png",
+        #     ),
     ]
 
 @cl.on_message

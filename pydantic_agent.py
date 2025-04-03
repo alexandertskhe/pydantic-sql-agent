@@ -12,6 +12,7 @@ from tools.sqlite_async import list_tables_names, describe_table, run_sql_query
 from tools.export_tool import query_to_csv_file
 from tools.knowledge_graph import use_knowledge_graph
 from tools.llm_query_enhancer import llm_enhance_query_for_export
+from utils.markdown import to_markdown
 
 # Import model
 from llm_model import model_openai
@@ -43,28 +44,30 @@ def create_sql_agent():
     async def system_prompt(ctx: RunContext) -> str:
         return f"""
         ROLE:
-        You are AI Agent, designed to interact with a SQLite database. You have access to both direct database tools and an advanced knowledge graph for query optimization.
+        You are AI Agent, designed to interact with a SQLite database. 
+        You have access to the following tools to interact with the database, to get information from knowledge graph and to export data to CSV.
 
         GOAL:
         Given an input question, create a syntactically correct SQLite query to run. RETURN humanlike answer based on query result.
-        If user requests data export or CSV, use the export_to_csv_tool after getting query results.
 
         CONTEXT:
-        You have access to following tables:
-        project_plans - Project plans table, it lists tasks related to the particular project.
-        project_roadmaps - Project roadmaps table, it lists projects plan roadmaps.
-        sis_airports - Table with information about airports, including airport names, IATA codes etc.
-        sis_wan - List of devices available, it's linked with sis_airports via primary and foreign keys.
+        Here is a list of tables in the database:
+        sis_airports - Table with information about airports, including airport names, IATA codes, and other relevant data.
+        sis_wan - List of WAN devices available and their characteristics, including device names, device types, and other relevant data.
 
         TOOL SELECTION STRATEGY:
-        - Use the knowledge_graph_tool for:
+        - FIRST, ALWAYS use list_tables_tool to get a list of all tables in the database.
+        - SECOND, ALWAYS use describe_table_tool to get a description of a table in the database.
+        - THIRD, before constructing a SQL query, ALWAYS use knowledge_graph_tool to get sample data, use this sample data to improve SQL qeuery.
+        - You can use knowledge_graph_tool to further improve your SQL queries:
+        * Getting detailed information about tables
         * Understanding table relationships and join paths
         * Viewing sample data to understand table contents
         * Getting representative column values
         * Generating SQL suggestions for complex queries
         
         INSTRUCTIONS:
-        1. For most queries, use the knowledge_graph_tool first with "info" action to explore relevant tables.
+        1. For most queries, use the knowledge_graph_tool with "info" action to explore relevant tables.
         2. For complex queries requiring joins, use knowledge_graph_tool with "path" action to determine optimal join paths.
         3. When you need sample column values, use knowledge_graph_tool with "samples" action.
         4. For complex multi-table queries, use knowledge_graph_tool with "suggest" action to get recommended SQL.
@@ -74,6 +77,7 @@ def create_sql_agent():
 
         QUERY CONSTRUCTION BEST PRACTICES:
         - Pay attention to case sensitivity when constructing queries - match the exact column names.
+        - When applying WHERE statements try to use LIKE statements instead of exact matches.
         - DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
         - For complex joins, get relationship information about primary and foreign keys from the knowledge graph.
         - When joining tables with one-to-many relationships (like sis_airports to sis_wan), always use DISTINCT to avoid duplicate entries. An airport may have multiple WAN devices, so queries joining these tables should use DISTINCT for airport data.
@@ -83,23 +87,24 @@ def create_sql_agent():
         """
 
     ########## Tools ##########
-    # @agent_sql.tool(retries=10)
-    # async def list_tables_tool(ctx: RunContext) -> str:
-    #     print('list_tables tool invoked')
-    #     """Use this tool to get a list of all tables in the database."""
-    #     database_tables = await list_tables_names(ctx.deps.db)
-    #     return f"Database tables: {to_markdown(database_tables)}"
+    @agent_sql.tool(retries=10)
+    async def list_tables_tool(ctx: RunContext) -> str:
+        print('list_tables tool invoked')
+        """Use this tool to get a list of all tables in the database."""
+        database_tables = await list_tables_names(ctx.deps.db)
+        return f"Database tables: {to_markdown(database_tables)}"
 
-    # @agent_sql.tool(retries=10)
-    # async def describe_table_tool(ctx: RunContext, table_name: str) -> str:
-    #     print('describe_table tool invoked')
-    #     """Use this tool to get a description of a table in the database."""
-    #     return await describe_table(ctx.deps.db, table_name)
+    @agent_sql.tool(retries=10)
+    async def describe_table_tool(ctx: RunContext, table_name: str) -> str:
+        print('describe_table tool invoked')
+        """Use this tool to get a description of a table in the database."""
+        return await describe_table(ctx.deps.db, table_name)
 
     @agent_sql.tool(retries=10)
     async def run_sql_query_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = 10) -> str:
         print('run_sql_query tool invoked')
-        """Use this tool to run a SQL query on the database. Double check your query before executing it. 
+        """Use this tool to run a SQL query on the database. Double check your query before executing it.
+        If query returns no results, check sample data from knowledge graph and try again. 
         If an error is returned, rewrite the query, check the query, and try again."""
         return await run_sql_query(ctx.deps.db, sql_query, limit)
 
@@ -155,7 +160,7 @@ def create_sql_agent():
     @agent_sql.tool(retries=10)
     async def knowledge_graph_tool(ctx: RunContext, action: str, tables: Optional[List[str]] = None, column: Optional[str] = None) -> str:
         """
-        Use this tool to get information from the knowledge graph about table relationships and sample data.
+        Use this tool to get information about database  tables, their relationships, schemas, and sample data.
         
         Args:
             action: The action to perform - one of: "info", "path", "suggest", "samples"

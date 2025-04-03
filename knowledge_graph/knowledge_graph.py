@@ -14,11 +14,15 @@ class DBKnowledgeGraph:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.graph = nx.DiGraph()
-        self.cache_file = f"{os.path.splitext(db_path)[0]}_graph.json"
+        db_name = os.path.basename(os.path.splitext(db_path)[0])
+        self.cache_file = os.path.join("knowledge_graph", f"{db_name}_graph.json")
         self.is_initialized = False
     
     async def initialize(self):
         """Build or load the knowledge graph"""
+        # Ensure the knowledge_graph directory exists
+        os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
+        
         if os.path.exists(self.cache_file) and self._is_cache_valid():
             print(f"Loading knowledge graph from cache: {self.cache_file}")
             self._load_from_cache()
