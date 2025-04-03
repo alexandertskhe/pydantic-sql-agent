@@ -1,5 +1,3 @@
-# utils/knowledge_graph.py
-
 import os
 import json
 import time

@@ -192,12 +192,18 @@ def add_foreign_key(conn, table_name, fk_column, ref_table, ref_column, orphan_h
     print(f"Added foreign key from {table_name}.{fk_column} to {ref_table}.{ref_column}")
     return True
 
+
+
+
+
+############## Add tables to db ##############
+
 # Add primary and foreign keys
 add_primary_key(conn, "sis_airports", "APT_ID")
 add_foreign_key(conn, "sis_wan", fk_column="APT_ID", ref_table="sis_airports", ref_column="APT_ID", orphan_handling='skip')
 
-add_primary_key(conn, "project_roadmaps", "key")
-add_foreign_key(conn, "project_plans", fk_column="key", ref_table="project_roadmaps", ref_column="key", orphan_handling='skip')
+# add_primary_key(conn, "project_roadmaps", "key")
+# add_foreign_key(conn, "project_plans", fk_column="key", ref_table="project_roadmaps", ref_column="key", orphan_handling='skip')
 
 # Close the connection
 conn.close()

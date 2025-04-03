@@ -6,7 +6,7 @@ import os
 
 from pydantic_agent import create_sql_agent, Dependencies
 from tools.sqlite_async import DatabaseManager
-from utils.knowledge_graph import DBKnowledgeGraph
+from knowledge_graph.knowledge_graph import DBKnowledgeGraph
 
 from dotenv import load_dotenv
 load_dotenv(override=True)
