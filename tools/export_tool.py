@@ -5,6 +5,9 @@ import re
 import time
 from typing import Optional, Tuple
 
+from tools.llm_query_enhancer_tool import llm_enhance_query_for_export
+
+
 # Directory to store CSV exports - shared with the FastAPI server
 EXPORT_DIR = "csv_exports"
 # URL of the FastAPI server
@@ -80,3 +83,50 @@ async def query_to_csv_file(db, sql_query: str, limit: Optional[int] = None) -> 
         import traceback
         print(traceback.format_exc())
         return "", "", 0
+
+async def enhanced_export_to_csv(db, sql_query: str, kg=None, limit: Optional[int] = None) -> str:
+    """
+    Generate a CSV export from a SQL query with optional query enhancement.
+    
+    Args:
+        db: Database connection
+        sql_query: SQL query to run and export results from
+        kg: Knowledge graph object (optional)
+        limit: Optional limit on number of rows (defaults to all rows)
+        
+    Returns:
+        Information about the generated CSV file including the download URL
+    """
+    
+    
+    print('enhanced_export_to_csv function invoked')
+    
+    # Check if the query needs enhancement for export
+    try:
+        # Pass the knowledge graph to the enhancer function
+        enhanced_query = await llm_enhance_query_for_export(db, sql_query, kg=kg)
+        if enhanced_query != sql_query:
+            print(f"Original query: {sql_query}")
+            print(f"Enhanced query: {enhanced_query}")
+            sql_query = enhanced_query
+    except Exception as e:
+        print(f"Error enhancing query: {e}")
+        # Continue with original query if enhancement fails
+    
+    # Generate the CSV file and get the download URL
+    filename, download_url, row_count = await query_to_csv_file(db, sql_query, limit)
+    
+    # Debug log the results
+    print(f"CSV Export result: filename={filename}, url={download_url}, rows={row_count}")
+    
+    if not filename or not download_url:
+        return "Failed to generate CSV file. Please check the query syntax and try again."
+    
+    if row_count == 0:
+        return "The query returned no results. Please modify your query to return data."
+    
+    return f"""
+CSV export generated successfully with {row_count} rows of data.
+
+You can download the file here: [Download {filename}]({download_url})
+"""

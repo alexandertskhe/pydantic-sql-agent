@@ -103,7 +103,7 @@ async def get_column_samples(kg, table_name: str, column_name: str) -> str:
             for val in stats["common_values"]:
                 result += f"  - '{val['value']}' (appears {val['count']} times)\n"
     
-    result += "\n⚠️ REMINDER: Use the EXACT values shown above in your SQL query. Do not assume or modify these values."
+    result += "\n REMINDER: Use the EXACT values shown above in your SQL query. Do not assume or modify these values."
     
     return result
 
@@ -188,3 +188,33 @@ async def use_knowledge_graph(kg, action: str, tables: Optional[List[str]] = Non
             
     else:
         return "Invalid action or missing parameters. Valid actions are: 'info', 'path', 'suggest', 'samples'."
+
+async def enhanced_knowledge_graph_tool(kg, action: str, tables: Optional[List[str]] = None, column: Optional[str] = None) -> str:
+    """
+    Enhanced version of the knowledge graph tool with additional contextual information based on action type.
+    
+    Args:
+        kg: Knowledge graph object
+        action: The action to perform - one of: "info", "path", "suggest", "samples"
+        tables: List of table names to analyze (required for "path" and "suggest" actions)
+        column: Column name for "samples" action
+        
+    Returns:
+        Information about table relationships, sample data, join paths, or SQL suggestions with additional context
+    """
+    # Get the basic result
+    result = await use_knowledge_graph(kg, action, tables, column)
+    
+    # For "samples" action, add a reminder to use the exact values
+    if action == "samples" and result and "Sample values" in result:
+        result += "\n\nIMPORTANT: Use THESE EXACT VALUES in your SQL WHERE clauses. Do not assume or guess values."
+    
+    # For "info" action, add a general reminder to check for relationships
+    if action == "info" and result and "No relationships" not in result:
+        result += "\n\nNote: Check if this table has relationships with other tables that might be relevant to the query."
+    
+    # For "path" action, emphasize the importance of proper join conditions
+    if action == "path" and result and "Join path between" in result:
+        result += "\n\nMake sure to use these exact join conditions in your SQL query to correctly relate the data."
+    
+    return result

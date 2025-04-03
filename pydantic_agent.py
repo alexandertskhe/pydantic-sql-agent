@@ -9,11 +9,9 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 # Import local tools and utils
-from tools.sqlite_db_tool import list_tables_names, describe_table, run_sql_query
+from tools.sqlite_db_tool import list_tables_names, describe_table
 from tools.sql_query_tool import run_sql_query_enhanced
-from tools.export_tool import query_to_csv_file
-from tools.knowledge_graph_tool import use_knowledge_graph
-from tools.llm_query_enhancer_tool import llm_enhance_query_for_export
+from tools.knowledge_graph_tool import enhanced_knowledge_graph_tool
 from utils.markdown import to_markdown
 
 # Import model
@@ -121,10 +119,8 @@ def create_sql_agent():
         # Use the enhanced SQL query function from the imported module
         return await run_sql_query_enhanced(ctx.deps.db, sql_query, ctx.deps.kg, limit)
 
-
     @agent_sql.tool(retries=3)
     async def export_to_csv_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = None) -> str:
-        print('export_to_csv tool invoked')
         """Use this tool to generate a CSV export from a SQL query.
         This tool will run the query, save results as a CSV file, and provide a download URL.
         
@@ -139,36 +135,10 @@ def create_sql_agent():
         Returns:
             Information about the generated CSV file including the download URL
         """
-
-        # Check if the query needs enhancement for export
-        try:
-            # Pass the knowledge graph to the enhancer function
-            enhanced_query = await llm_enhance_query_for_export(ctx.deps.db, sql_query, kg=ctx.deps.kg)
-            if enhanced_query != sql_query:
-                print(f"Original query: {sql_query}")
-                print(f"Enhanced query: {enhanced_query}")
-                sql_query = enhanced_query
-        except Exception as e:
-            print(f"Error enhancing query: {e}")
-            # Continue with original query if enhancement fails
+        print('export_to_csv tool invoked')
+        from tools.export_tool import enhanced_export_to_csv
         
-        # Generate the CSV file and get the download URL
-        filename, download_url, row_count = await query_to_csv_file(ctx.deps.db, sql_query, limit)
-        
-        # Debug log the results
-        print(f"CSV Export result: filename={filename}, url={download_url}, rows={row_count}")
-        
-        if not filename or not download_url:
-            return "Failed to generate CSV file. Please check the query syntax and try again."
-        
-        if row_count == 0:
-            return "The query returned no results. Please modify your query to return data."
-        
-        return f"""
-    CSV export generated successfully with {row_count} rows of data.
-
-    You can download the file here: [Download {filename}]({download_url})
-    """
+        return await enhanced_export_to_csv(ctx.deps.db, sql_query, ctx.deps.kg, limit)
 
     @agent_sql.tool(retries=10)
     async def knowledge_graph_tool(ctx: RunContext, action: str, tables: Optional[List[str]] = None, column: Optional[str] = None) -> str:
@@ -187,22 +157,8 @@ def create_sql_agent():
                 
         Returns:
             Information about table relationships, sample data, join paths, or SQL suggestions
-        """
-        result = await use_knowledge_graph(ctx.deps.kg, action, tables, column)
-        
-        # For "samples" action, add a reminder to use the exact values
-        if action == "samples" and result and "Sample values" in result:
-            result += "\n\nIMPORTANT: Use THESE EXACT VALUES in your SQL WHERE clauses. Do not assume or guess values."
-        
-        # For "info" action, add a general reminder to check for relationships
-        if action == "info" and result and not "No relationships" in result:
-            result += "\n\nNote: Check if this table has relationships with other tables that might be relevant to the query."
-        
-        # For "path" action, emphasize the importance of proper join conditions
-        if action == "path" and result and "Join path between" in result:
-            result += "\n\nMake sure to use these exact join conditions in your SQL query to correctly relate the data."
-        
-        return result
+        """ 
+        return await enhanced_knowledge_graph_tool(ctx.deps.kg, action, tables, column)
 
     return agent_sql
 
