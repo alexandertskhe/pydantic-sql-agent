@@ -2,6 +2,7 @@ import asyncio
 from typing import Optional, List, Any
 import aiosqlite
 from dataclasses import dataclass
+import re
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import UsageLimitExceeded
@@ -55,35 +56,30 @@ def create_sql_agent():
         sis_airports - Table with information about airports, including airport names, IATA codes, and other relevant data.
         sis_wan - List of WAN devices available and their characteristics, including device names, device types, and other relevant data.
 
-        TOOL SELECTION STRATEGY:
-        - FIRST, ALWAYS use list_tables_tool to get a list of all tables in the database.
-        - SECOND, ALWAYS use describe_table_tool to get a description of a table in the database.
-        - THIRD, before constructing a SQL query, ALWAYS use knowledge_graph_tool to get sample data, use this sample data to improve SQL qeuery.
-        - You can use knowledge_graph_tool to further improve your SQL queries:
-        * Getting detailed information about tables
-        * Understanding table relationships and join paths
-        * Viewing sample data to understand table contents
-        * Getting representative column values
-        * Generating SQL suggestions for complex queries
+        MANDATORY WORKFLOW:
+        1. ALWAYS start by using list_tables_tool to get a list of all tables in the database.
+        2. ALWAYS use describe_table_tool to get a description of each table in the database you'll need.
+        3. ALWAYS use knowledge_graph_tool with "info" action to explore relevant tables.
+        4. CRITICAL: Before writing ANY SQL with WHERE clauses, you MUST use knowledge_graph_tool with "samples" action 
+        for EACH column that will be in your WHERE clause.
+        Example: knowledge_graph_tool(action="samples", tables=["sis_airports"], column="STATUS")
+        5. Only AFTER checking sample data, construct your SQL query using EXACT values from the sample data.
+        6. Use the run_sql_query_tool to execute your final SQL query.
         
-        INSTRUCTIONS:
-        1. For most queries, use the knowledge_graph_tool with "info" action to explore relevant tables.
-        2. For complex queries requiring joins, use knowledge_graph_tool with "path" action to determine optimal join paths.
-        3. When you need sample column values, use knowledge_graph_tool with "samples" action.
-        4. For complex multi-table queries, use knowledge_graph_tool with "suggest" action to get recommended SQL.
-        5. Always use the run_sql_query_tool to execute your final SQL query.
-        6. If the user asks for data export, CSV, or downloadable results, use the export_to_csv_tool and provide the download URL.
-        7. When searching for airports use AIRPORT IATA instead of AIRPORT_NAME. ALSO provice AIRPORT_HUB_ID. Do not provide AIPORT_NAME in answer, only IATA and HUB_ID.
-
-        QUERY CONSTRUCTION BEST PRACTICES:
-        - Pay attention to case sensitivity when constructing queries - match the exact column names.
-        - When applying WHERE statements try to use LIKE statements instead of exact matches.
+        QUERY CONSTRUCTION RULES:
+        - NEVER assume values for WHERE clauses. ALWAYS check sample data first.
+        - Pay attention to case sensitivity - match the exact column names and values.
+        - For text fields, consider using LIKE '%value%' instead of exact matches.
+        - When searching by regions or status, check the EXACT valid values that exist in the database.
+        - Example: If user asks for "active airports in EUR region", you MUST:
+        * First check sample values for STATUS column
+        * First check sample values for AIRPORT_REGION column
+        * Use those EXACT values in your WHERE clause (not just 'Active' or 'EUR' if those aren't the exact values)
         - DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
-        - For complex joins, get relationship information about primary and foreign keys from the knowledge graph.
-        - When joining tables with one-to-many relationships (like sis_airports to sis_wan), always use DISTINCT to avoid duplicate entries. An airport may have multiple WAN devices, so queries joining these tables should use DISTINCT for airport data.
-        - For aggregation queries (COUNT, SUM, etc.), make sure to use appropriate GROUP BY clauses.
-        - When user mentions "download", "export", "extract", or "CSV", always generate a CSV file.
-        - Present download links clearly so users can access their data.
+        - For complex joins, get relationship information about primary and foreign keys.
+        - When joining tables with one-to-many relationships (like sis_airports to sis_wan), always use DISTINCT.
+        - When user mentions "download", "export", "extract", or "CSV", use the export_to_csv_tool.
+        - When searching for airports use AIRPORT_IATA instead of AIRPORT_NAME. ALSO provide AIRPORT_HUB_ID.
         """
 
     ########## Tools ##########
@@ -102,11 +98,88 @@ def create_sql_agent():
 
     @agent_sql.tool(retries=10)
     async def run_sql_query_tool(ctx: RunContext, sql_query: str, limit: Optional[int] = 10) -> str:
+        """
+        Use this tool to run a SQL query on the database.
+        
+        IMPORTANT: If your query returns no results:
+        1. Double check your WHERE clause values against sample data
+        2. Consider using LIKE operators for text fields
+        3. Try case-insensitive comparison for text fields
+        
+        Args:
+            sql_query: SQL query to run
+            limit: Maximum number of rows to return (default: 10)
+        
+        Returns:
+            Query results in JSON format
+        """
         print('run_sql_query tool invoked')
-        """Use this tool to run a SQL query on the database. Double check your query before executing it.
-        If query returns no results, check sample data from knowledge graph and try again. 
-        If an error is returned, rewrite the query, check the query, and try again."""
-        return await run_sql_query(ctx.deps.db, sql_query, limit)
+        
+        # Execute the original query
+        result = await run_sql_query(ctx.deps.db, sql_query, limit)
+        
+        # Check if the result is empty (no rows returned)
+        if result == '[]':
+            print("Original query returned no results, attempting fallback strategies")
+            
+            # Check if query has WHERE clause with exact text matches
+            if 'WHERE' in sql_query.upper() and '=' in sql_query:
+                # Try a modified query with LIKE instead of equals for text comparisons
+                modified_query = sql_query
+                
+                # Find table name to get column types
+                table_match = re.search(r'FROM\s+([^\s,;]+)', sql_query, re.IGNORECASE)
+                if table_match:
+                    table_name = table_match.group(1).strip('"`[]')
+                    
+                    # Get column info to identify text columns
+                    try:
+                        cursor = await ctx.deps.db.execute(f"PRAGMA table_info({table_name});")
+                        columns = await cursor.fetchall()
+                        text_columns = [col[1] for col in columns if 'TEXT' in col[2].upper()]
+                        
+                        # Extract conditions from WHERE clause
+                        where_match = re.search(r'WHERE\s+(.*?)(?:ORDER BY|GROUP BY|LIMIT|$)', sql_query, re.IGNORECASE | re.DOTALL)
+                        if where_match:
+                            where_clause = where_match.group(1).strip()
+                            conditions = re.split(r'\s+AND\s+', where_clause, flags=re.IGNORECASE)
+                            
+                            # Modify conditions for text columns to use LIKE
+                            new_conditions = []
+                            for condition in conditions:
+                                # Check if this condition is on a text column with exact match
+                                for col in text_columns:
+                                    if re.search(rf'\b{re.escape(col)}\s*=\s*[\'"]', condition, re.IGNORECASE):
+                                        # Replace = with LIKE and add wildcards
+                                        new_condition = re.sub(
+                                            rf'(\b{re.escape(col)}\s*)=\s*([\'"])(.*?)([\'"])', 
+                                            r'\1 LIKE \2%\3%\4', 
+                                            condition
+                                        )
+                                        new_conditions.append(new_condition)
+                                        break
+                                else:
+                                    new_conditions.append(condition)
+                            
+                            # Replace the WHERE clause in the original query
+                            new_where_clause = ' AND '.join(new_conditions)
+                            modified_query = re.sub(
+                                r'WHERE\s+.*?(?=ORDER BY|GROUP BY|LIMIT|$)', 
+                                f'WHERE {new_where_clause} ', 
+                                sql_query, 
+                                flags=re.IGNORECASE | re.DOTALL
+                            )
+                            
+                            # Run the modified query
+                            print(f"Trying modified query with LIKE: {modified_query}")
+                            modified_result = await run_sql_query(ctx.deps.db, modified_query, limit)
+                            
+                            if modified_result != '[]':
+                                return modified_result + "\n\nNote: Results found using partial matching (LIKE operator) instead of exact matches."
+                    except Exception as e:
+                        print(f"Error in fallback query strategy: {e}")
+        
+        return result
 
 
     @agent_sql.tool(retries=3)
@@ -160,17 +233,26 @@ def create_sql_agent():
     @agent_sql.tool(retries=10)
     async def knowledge_graph_tool(ctx: RunContext, action: str, tables: Optional[List[str]] = None, column: Optional[str] = None) -> str:
         """
-        Use this tool to get information about database  tables, their relationships, schemas, and sample data.
+        Use this tool to get information about database tables, their relationships, schemas, and sample data.
+        
+        IMPORTANT: You MUST use this tool to check sample values for any column you'll use in 
+        WHERE clauses BEFORE writing your SQL query to ensure you use actual values from the database.
         
         Args:
             action: The action to perform - one of: "info", "path", "suggest", "samples"
             tables: List of table names to analyze (required for "path" and "suggest" actions)
             column: Column name for "samples" action
-            
+                
         Returns:
             Information about table relationships, sample data, join paths, or SQL suggestions
         """
-        return await use_knowledge_graph(ctx.deps.kg, action, tables, column)
+        result = await use_knowledge_graph(ctx.deps.kg, action, tables, column)
+        
+        # For "samples" action, add a reminder to use the exact values
+        if action == "samples" and result and "Sample values" in result:
+            result += "\n\nIMPORTANT: Use THESE EXACT VALUES in your SQL WHERE clauses. Do not assume or guess values."
+            
+        return result
 
     return agent_sql
 

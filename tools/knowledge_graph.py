@@ -79,9 +79,12 @@ async def get_column_samples(kg, table_name: str, column_name: str) -> str:
         
     result = f"### Sample values for {table_name}.{column_name}:\n"
     
-    # Add sample values
+    # Add sample values with more emphasis
     if "sample_values" in column_info and column_info["sample_values"]:
-        result += "Sample values: " + ", ".join([str(v) for v in column_info["sample_values"]]) + "\n\n"
+        result += "Sample values (use THESE EXACT VALUES in your query):\n"
+        for value in column_info["sample_values"]:
+            result += f"- '{value}'\n"
+        result += "\n"
     
     # Add statistics
     if "statistics" in column_info:
@@ -96,9 +99,11 @@ async def get_column_samples(kg, table_name: str, column_name: str) -> str:
         
         # Add common values if available
         if "common_values" in stats and stats["common_values"]:
-            result += "- Most common values:\n"
+            result += "- Most common values (with frequency):\n"
             for val in stats["common_values"]:
-                result += f"  - {val['value']} (appears {val['count']} times)\n"
+                result += f"  - '{val['value']}' (appears {val['count']} times)\n"
+    
+    result += "\n⚠️ REMINDER: Use the EXACT values shown above in your SQL query. Do not assume or modify these values."
     
     return result
 
