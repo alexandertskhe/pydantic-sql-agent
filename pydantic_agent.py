@@ -52,34 +52,35 @@ def create_sql_agent():
         Given an input question, create a syntactically correct SQLite query to run. RETURN humanlike answer based on query result.
 
         CONTEXT:
-        Here is a list of tables in the database:
-        sis_airports - Table with information about airports, including airport names, IATA codes, and other relevant data.
-        sis_wan - List of WAN devices available and their characteristics, including device names, device types, and other relevant data.
+        The database contains related tables with relevant information. Use the list_tables_tool to discover all available tables.
 
         MANDATORY WORKFLOW:
         1. ALWAYS start by using list_tables_tool to get a list of all tables in the database.
         2. ALWAYS use describe_table_tool to get a description of each table in the database you'll need.
-        3. ALWAYS use knowledge_graph_tool with "info" action to explore relevant tables.
-        4. CRITICAL: Before writing ANY SQL with WHERE clauses, you MUST use knowledge_graph_tool with "samples" action 
+        3. For questions that may involve relationships between tables, use knowledge_graph_tool with "path" action to check how tables can be joined.
+        4. ALWAYS use knowledge_graph_tool with "info" action to explore relevant tables.
+        5. CRITICAL: Before writing ANY SQL with WHERE clauses, you MUST use knowledge_graph_tool with "samples" action 
         for EACH column that will be in your WHERE clause.
-        Example: knowledge_graph_tool(action="samples", tables=["sis_airports"], column="STATUS")
-        5. Only AFTER checking sample data, construct your SQL query using EXACT values from the sample data.
-        6. Use the run_sql_query_tool to execute your final SQL query.
+        Example: knowledge_graph_tool(action="samples", tables=["table_name"], column="column_name")
+        6. Only AFTER checking sample data, construct your SQL query using EXACT values from the sample data.
+        7. Use the run_sql_query_tool to execute your final SQL query.
         
         QUERY CONSTRUCTION RULES:
         - NEVER assume values for WHERE clauses. ALWAYS check sample data first.
         - Pay attention to case sensitivity - match the exact column names and values.
         - For text fields, consider using LIKE '%value%' instead of exact matches.
-        - When searching by regions or status, check the EXACT valid values that exist in the database.
-        - Example: If user asks for "active airports in EUR region", you MUST:
-        * First check sample values for STATUS column
-        * First check sample values for AIRPORT_REGION column
-        * Use those EXACT values in your WHERE clause (not just 'Active' or 'EUR' if those aren't the exact values)
+        - When searching by categories or status fields, check the EXACT valid values that exist in the database.
         - DO NOT make any DML statements (INSERT, UPDATE, DELETE, DROP etc.) to the database.
         - For complex joins, get relationship information about primary and foreign keys.
-        - When joining tables with one-to-many relationships (like sis_airports to sis_wan), always use DISTINCT.
+        - When joining tables with one-to-many relationships, always use DISTINCT to avoid duplicate rows.
         - When user mentions "download", "export", "extract", or "CSV", use the export_to_csv_tool.
-        - When searching for airports use AIRPORT_IATA instead of AIRPORT_NAME. ALSO provide AIRPORT_HUB_ID.
+        
+        MULTI-TABLE QUERIES:
+        - When a question might involve data from multiple areas, always consider if it requires joining tables
+        - Use knowledge_graph_tool with "path" action to find join paths between potentially related tables
+        - Questions that ask for information from different domains usually require joins
+        - Be aware of the relationships between tables and use appropriate JOIN conditions
+        - If a query returns no results, consider if you need to join with related tables
         """
 
     ########## Tools ##########
@@ -105,6 +106,7 @@ def create_sql_agent():
         1. Double check your WHERE clause values against sample data
         2. Consider using LIKE operators for text fields
         3. Try case-insensitive comparison for text fields
+        4. Check if the query should involve JOINs with related tables
         
         Args:
             sql_query: SQL query to run
@@ -121,6 +123,11 @@ def create_sql_agent():
         # Check if the result is empty (no rows returned)
         if result == '[]':
             print("Original query returned no results, attempting fallback strategies")
+
+            # Extract table name from query if possible
+            table_match = re.search(r'FROM\s+([^\s,;]+)', sql_query, re.IGNORECASE)
+            if table_match:
+                table_name = table_match.group(1).strip('"`[]')
             
             # Check if query has WHERE clause with exact text matches
             if 'WHERE' in sql_query.upper() and '=' in sql_query:
@@ -178,7 +185,28 @@ def create_sql_agent():
                                 return modified_result + "\n\nNote: Results found using partial matching (LIKE operator) instead of exact matches."
                     except Exception as e:
                         print(f"Error in fallback query strategy: {e}")
-        
+
+            # If we have knowledge graph access, suggest potential joins
+            if ctx.deps.kg and ctx.deps.kg.is_initialized:
+                # Check for single-table query that might need joins
+                if "JOIN" not in sql_query.upper():
+                    # Get connected tables from knowledge graph
+                    table_info = ctx.deps.kg.get_table_info(table_name)
+                    if table_info and "relationships" in table_info and table_info["relationships"]:
+                        suggestion = "No results found. Consider checking related tables with joins. This table has relationships with:\n"
+                        related_tables = []
+                        
+                        for rel in table_info["relationships"]:
+                            if "target_table" in rel:
+                                related_tables.append(f"- {rel['target_table']} (via {rel['from_column']} = {rel['to_column']})")
+                            elif "source_table" in rel:
+                                related_tables.append(f"- {rel['source_table']} (via {rel['from_column']} = {rel['to_column']})")
+                        
+                        if related_tables:
+                            suggestion += "\n".join(related_tables)
+                            suggestion += "\n\nUse knowledge_graph_tool with action='path' to find proper join paths."
+                            return suggestion
+    
         return result
 
 
@@ -238,6 +266,8 @@ def create_sql_agent():
         IMPORTANT: You MUST use this tool to check sample values for any column you'll use in 
         WHERE clauses BEFORE writing your SQL query to ensure you use actual values from the database.
         
+        When a user query might involve multiple tables, use this tool with action="path" to find join paths.
+        
         Args:
             action: The action to perform - one of: "info", "path", "suggest", "samples"
             tables: List of table names to analyze (required for "path" and "suggest" actions)
@@ -251,7 +281,15 @@ def create_sql_agent():
         # For "samples" action, add a reminder to use the exact values
         if action == "samples" and result and "Sample values" in result:
             result += "\n\nIMPORTANT: Use THESE EXACT VALUES in your SQL WHERE clauses. Do not assume or guess values."
-            
+        
+        # For "info" action, add a general reminder to check for relationships
+        if action == "info" and result and not "No relationships" in result:
+            result += "\n\nNote: Check if this table has relationships with other tables that might be relevant to the query."
+        
+        # For "path" action, emphasize the importance of proper join conditions
+        if action == "path" and result and "Join path between" in result:
+            result += "\n\nMake sure to use these exact join conditions in your SQL query to correctly relate the data."
+        
         return result
 
     return agent_sql
