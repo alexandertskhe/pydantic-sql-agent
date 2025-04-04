@@ -16,17 +16,27 @@ class DBKnowledgeGraph:
         self.db_path = db_path
         self.graph = nx.DiGraph()
         db_name = os.path.basename(os.path.splitext(db_path)[0])
-        self.cache_file = os.path.join("knowledge_graph", f"{db_name}_knowledge_graph.json")
+        self.cache_file = os.path.join("knowledge_graph", f"{db_name}_kg.json")
+        self.metadata_file = os.path.join("knowledge_graph", f"{db_name}_kg_metadata.json")
         self.is_initialized = False
+        self.metadata = {
+            "tables": {}
+        }
     
     async def initialize(self):
         """Build or load the knowledge graph"""
         # Ensure the knowledge_graph directory exists
         os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
         
+        # First load metadata
+        self._load_metadata()
+        
         if os.path.exists(self.cache_file) and self._is_cache_valid():
             print(f"Loading knowledge graph from cache: {self.cache_file}")
             self._load_from_cache()
+            
+            # Enhance with metadata
+            self._enhance_with_metadata()
         else:
             print(f"Building knowledge graph from database: {self.db_path}")
             await self._build_from_db()
@@ -34,6 +44,54 @@ class DBKnowledgeGraph:
         
         self.is_initialized = True
         return self
+    
+    def _load_metadata(self):
+        """Load metadata from JSON file."""
+        if os.path.exists(self.metadata_file):
+            try:
+                with open(self.metadata_file, 'r') as f:
+                    self.metadata = json.load(f)
+                print(f"Loaded metadata from {self.metadata_file}")
+            except Exception as e:
+                print(f"Error loading metadata: {e}")
+                # Use empty metadata
+                self.metadata = {"tables": {}}
+        else:
+            print(f"Metadata file not found: {self.metadata_file}")
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.metadata_file), exist_ok=True)
+            # Use empty metadata
+            self.metadata = {"tables": {}}
+    
+    def _enhance_with_metadata(self):
+        """Enhance the graph with metadata descriptions and synonyms"""
+        # Iterate through each table node and add metadata
+        for table_name in self.graph.nodes:
+            # Add table descriptions and synonyms
+            table_info = self.metadata.get("tables", {}).get(table_name, {})
+            table_description = table_info.get("description", "")
+            table_synonyms = table_info.get("synonyms", [])
+            
+            if table_description:
+                self.graph.nodes[table_name]['description'] = table_description
+            
+            if table_synonyms:
+                self.graph.nodes[table_name]['synonyms'] = table_synonyms
+            
+            # Add column descriptions and synonyms
+            if 'columns' in self.graph.nodes[table_name]:
+                columns = self.graph.nodes[table_name]['columns']
+                for col in columns:
+                    col_name = col['name']
+                    col_info = table_info.get("columns", {}).get(col_name, {})
+                    col_description = col_info.get("description", "")
+                    col_synonyms = col_info.get("synonyms", [])
+                    
+                    if col_description:
+                        col['description'] = col_description
+                    
+                    if col_synonyms:
+                        col['synonyms'] = col_synonyms
     
     async def _build_from_db(self):
         """Extract schema and build graph from database with sample data"""
@@ -58,14 +116,39 @@ class DBKnowledgeGraph:
                 print(f"Sample data rows: {len(sample_data.get('rows', []))}")
                 print(f"Sample data stats keys: {list(sample_data.get('stats', {}).keys())}")
                 
+                # Add table description and synonyms from metadata if available
+                table_info = self.metadata.get("tables", {}).get(table_name, {})
+                table_description = table_info.get("description", "")
+                table_synonyms = table_info.get("synonyms", [])
+                
                 # Add table node with all metadata
-                self.graph.add_node(
-                    table_name,
-                    type="table",
-                    columns=schema["columns"],
-                    primary_keys=schema["primary_keys"],
-                    sample_data=sample_data
-                )
+                node_attrs = {
+                    "type": "table",
+                    "columns": schema["columns"],
+                    "primary_keys": schema["primary_keys"],
+                    "sample_data": sample_data
+                }
+                
+                if table_description:
+                    node_attrs["description"] = table_description
+                
+                if table_synonyms:
+                    node_attrs["synonyms"] = table_synonyms
+                
+                self.graph.add_node(table_name, **node_attrs)
+                
+                # Add column descriptions and synonyms
+                for col in schema["columns"]:
+                    col_name = col["name"]
+                    col_info = table_info.get("columns", {}).get(col_name, {})
+                    col_description = col_info.get("description", "")
+                    col_synonyms = col_info.get("synonyms", [])
+                    
+                    if col_description:
+                        col["description"] = col_description
+                    
+                    if col_synonyms:
+                        col["synonyms"] = col_synonyms
                 
                 # Verify sample data was added
                 node_data = self.graph.nodes[table_name]
@@ -288,10 +371,117 @@ class DBKnowledgeGraph:
         
         return False
     
+    def get_table_description(self, table_name: str) -> str:
+        """Get the description for a table."""
+        if not self.is_initialized:
+            return ""
+        
+        table_info = self.metadata.get("tables", {}).get(table_name, {})
+        return table_info.get("description", "")
+    
+    def get_column_description(self, table_name: str, column_name: str) -> str:
+        """Get the description for a column."""
+        if not self.is_initialized:
+            return ""
+        
+        table_info = self.metadata.get("tables", {}).get(table_name, {})
+        column_info = table_info.get("columns", {}).get(column_name, {})
+        return column_info.get("description", "")
+    
+    def get_table_synonyms(self, table_name: str) -> List[str]:
+        """Get synonyms for a table."""
+        if not self.is_initialized:
+            return []
+        
+        table_info = self.metadata.get("tables", {}).get(table_name, {})
+        return table_info.get("synonyms", [])
+    
+    def get_column_synonyms(self, table_name: str, column_name: str) -> List[str]:
+        """Get synonyms for a column."""
+        if not self.is_initialized:
+            return []
+        
+        table_info = self.metadata.get("tables", {}).get(table_name, {})
+        column_info = table_info.get("columns", {}).get(column_name, {})
+        return column_info.get("synonyms", [])
+    
+    def find_table_by_synonym(self, synonym: str) -> Optional[str]:
+        """
+        Find a table name by its synonym.
+        """
+        if not self.is_initialized:
+            return None
+        
+        # First, check if it's a direct table name
+        if synonym in self.graph.nodes:
+            return synonym
+        
+        synonym = synonym.lower()
+        for table_name, table_info in self.metadata.get("tables", {}).items():
+            if table_name.lower() == synonym:
+                return table_name
+                
+            for table_syn in table_info.get("synonyms", []):
+                if table_syn.lower() == synonym:
+                    return table_name
+        
+        # Do fuzzy matching if needed
+        for node in self.graph.nodes:
+            node_data = self.graph.nodes[node]
+            
+            # Check if the node has synonyms
+            for node_synonym in node_data.get('synonyms', []):
+                if node_synonym.lower() == synonym:
+                    return node
+        
+        return None
+    
+    def find_column_by_synonym(self, table_name: str, synonym: str) -> Optional[str]:
+        """
+        Find a column by name or synonym in a specific table.
+        """
+        if table_name not in self.graph.nodes:
+            return None
+        
+        node_data = self.graph.nodes[table_name]
+        columns = node_data.get('columns', [])
+        
+        # First, check if it's a direct column name
+        for col in columns:
+            if col['name'].lower() == synonym.lower():
+                return col['name']
+        
+        # Then check metadata
+        table_info = self.metadata.get("tables", {}).get(table_name, {})
+        column_info = table_info.get("columns", {})
+        
+        synonym = synonym.lower()
+        for col_name, col_data in column_info.items():
+            if col_name.lower() == synonym:
+                return col_name
+                
+            for col_syn in col_data.get('synonyms', []):
+                if col_syn.lower() == synonym:
+                    return col_name
+        
+        # Do fuzzy matching if needed
+        for col in columns:
+            # Check column synonyms
+            for col_synonym in col.get('synonyms', []):
+                if col_synonym.lower() == synonym:
+                    return col['name']
+        
+        return None
+
     def get_table_info(self, table_name: str) -> Dict[str, Any]:
-        """Get detailed information about a table including sample data"""
+        """Get detailed information about a table including sample data and descriptions"""
         if not self.is_initialized:
             return {"error": "Knowledge graph not initialized"}
+        
+        # Try to resolve by synonym first
+        resolved_table = self.find_table_by_synonym(table_name)
+        if resolved_table:
+            table_name = resolved_table
         
         if table_name not in self.graph:
             return {"error": f"Table '{table_name}' not found in graph"}
@@ -320,6 +510,10 @@ class DBKnowledgeGraph:
             })
         
         node_data["relationships"] = relationships
+        
+        # Ensure description is included
+        if 'description' not in node_data:
+            node_data['description'] = self.get_table_description(table_name) or ""
         
         # Include sample data in a more readable format
         if "sample_data" in node_data:
