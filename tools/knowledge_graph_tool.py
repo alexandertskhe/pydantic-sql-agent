@@ -81,29 +81,48 @@ async def get_column_samples(kg, table_name: str, column_name: str) -> str:
     
     # Add sample values with more emphasis
     if "sample_values" in column_info and column_info["sample_values"]:
-        result += "Sample values (use THESE EXACT VALUES in your query):\n"
+        result += "**Sample values** (use THESE EXACT VALUES in your query):\n"
         for value in column_info["sample_values"]:
-            result += f"- '{value}'\n"
+            result += f"- `{value}`\n"
         result += "\n"
     
     # Add statistics
     if "statistics" in column_info:
         stats = column_info["statistics"]
-        result += "Statistics:\n"
+        result += "**Statistics:**\n"
         if "distinct_count" in stats:
             result += f"- Distinct values: {stats['distinct_count']}\n"
         if "min_value" in stats and stats["min_value"] is not None:
-            result += f"- Minimum value: {stats['min_value']}\n"
+            result += f"- Minimum value: `{stats['min_value']}`\n"
         if "max_value" in stats and stats["max_value"] is not None:
-            result += f"- Maximum value: {stats['max_value']}\n"
+            result += f"- Maximum value: `{stats['max_value']}`\n"
         
-        # Add common values if available
+        # Highlight common values more prominently
         if "common_values" in stats and stats["common_values"]:
-            result += "- Most common values (with frequency):\n"
+            result += "\n**Most common values** (with frequency):\n"
             for val in stats["common_values"]:
-                result += f"  - '{val['value']}' (appears {val['count']} times)\n"
+                value_str = str(val['value']).replace('"', '\\"')  # Escape quotes for SQL compatibility
+                result += f"- `{value_str}` (appears {val['count']} times)\n"
+            
+            # Add explicit SQL examples using the most common values
+            if len(stats["common_values"]) > 0:
+                result += "\n**Example SQL filters:**\n"
+                
+                # Get the most common value for example queries
+                example_val = stats["common_values"][0]['value']
+                if example_val is not None:
+                    example_str = str(example_val)
+                    
+                    # Format differently based on value type
+                    if isinstance(example_val, (int, float)):
+                        result += f"- `WHERE {column_name} = {example_str}`\n"
+                        result += f"- `WHERE {column_name} > {example_str}`\n"
+                    else:
+                        # String value - use quotes and show LIKE example
+                        result += f"- `WHERE {column_name} = '{example_str}'`\n"
+                        result += f"- `WHERE {column_name} LIKE '%{example_str}%'`\n"
     
-    result += "\n REMINDER: Use the EXACT values shown above in your SQL query. Do not assume or modify these values."
+    result += "\n**IMPORTANT**: Use the EXACT values shown above in your SQL query. Do not assume or modify these values."
     
     return result
 

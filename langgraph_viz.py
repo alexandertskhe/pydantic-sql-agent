@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph
 # Import your graph creation function
 from langgraph_implementation import create_graph
 
-def visualize_langgraph(output_file="langgraph_visualization.png", format="png"):
+def visualize_langgraph(output_file="langgraph_viz.png", format="png"):
     """
     Visualize the LangGraph workflow.
     

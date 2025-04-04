@@ -16,7 +16,7 @@ class DBKnowledgeGraph:
         self.db_path = db_path
         self.graph = nx.DiGraph()
         db_name = os.path.basename(os.path.splitext(db_path)[0])
-        self.cache_file = os.path.join("knowledge_graph", f"{db_name}_graph.json")
+        self.cache_file = os.path.join("knowledge_graph", f"{db_name}_knowledge_graph.json")
         self.is_initialized = False
     
     async def initialize(self):
@@ -131,14 +131,14 @@ class DBKnowledgeGraph:
                     
                     # Get most common values (for categorical columns with few unique values)
                     common_values = []
-                    if distinct_count is not None and distinct_count < 20:
+                    if distinct_count is not None and distinct_count < 50:
                         common_values_query = f"""
                         SELECT \"{column}\", COUNT(*) as count 
                         FROM \"{table_name}\"
                         WHERE \"{column}\" IS NOT NULL
                         GROUP BY \"{column}\"
                         ORDER BY count DESC
-                        LIMIT 5
+                        LIMIT 20
                         """
                         cursor = await db.execute(common_values_query)
                         common_values_rows = await cursor.fetchall()
