@@ -2,8 +2,8 @@ import chainlit as cl
 from typing import Dict, List, Any
 import os
 
-# Import the MessageGraph implementation
-from langgraph_implementation import run_message_graph_stream
+# Import the graph implementation
+from langgraph_implementation import run_graph
 from knowledge_graph.knowledge_graph import DBKnowledgeGraph
 
 from dotenv import load_dotenv
@@ -66,8 +66,8 @@ async def main(message: cl.Message):
         # Get existing messages for this user if available
         previous_messages = user_messages.get(user_id, [])
         
-        # Use MessageGraph
-        response, updated_messages = await run_message_graph_stream(
+        # Use the graph
+        response, updated_messages = await run_graph(
             user_input=message.content,
             previous_messages=previous_messages
         )
@@ -76,7 +76,8 @@ async def main(message: cl.Message):
         user_messages[user_id] = updated_messages
         
         # Stream the response to the UI
-        await msg.stream_token(response)
+        for char in response:
+            await msg.stream_token(char)
         await msg.update()
         
         # Debug: Print conversation history
@@ -86,11 +87,13 @@ async def main(message: cl.Message):
             # Extract role and content
             role = msg_obj.type
             content = msg_obj.content
-            print(f"{i}: {role} - {content[:50]}...")
+            print(f"{i}: {role} - {content[:100]}...")
         print('-------------------------')
 
     except Exception as e:
-        await msg.update(content=f"An error occurred: {str(e)}")
+        # Update the message properly
+        await msg.stream_token(f"An error occurred: {str(e)}")
+        await msg.update()
         print(f'Error during execution: {e}')
         import traceback
         traceback.print_exc()

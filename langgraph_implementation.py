@@ -1,9 +1,8 @@
 import os
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional, Union, Tuple, TypedDict
 
 # LangGraph imports
-from langgraph.graph import END
-from langgraph.graph.message import MessageGraph
+from langgraph.graph import END, StateGraph
 from langchain_core.messages import HumanMessage, AIMessage
 
 # Import existing agent and tools
@@ -15,19 +14,21 @@ from utils.message_converter import convert_langgraph_to_pydantic_messages
 # For typing
 from pydantic_ai.usage import UsageLimits
 
-# Node functions for the graph
-from typing import List, Any
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
+# Define State TypedDict
+class State(TypedDict):
+    messages: List[Any]
+    query_result: Optional[str]
 
-
-async def agent_node(messages: List[Any]) -> List[Any]:
+async def agent_node(state: State) -> State:
     """Process messages through the SQL agent."""
     print("Executing agent node")
+    
+    messages = state.get("messages", [])
     
     # Get the latest user message
     user_message = messages[-1] if messages else None
     if not user_message or not hasattr(user_message, "content"):
-        return [AIMessage(content="No valid user message found")]
+        return {"messages": messages + [AIMessage(content="No valid user message found")], "query_result": None}
     
     # Initialize database connection
     db_manager = DatabaseManager('sqlite_db/sqlite.db')
@@ -55,24 +56,25 @@ async def agent_node(messages: List[Any]) -> List[Any]:
             message_history=agent_message_history,
         )
         
-        # Return the agent's response as an AIMessage
-        return [AIMessage(content=response.data)]
+        # Update state with the agent's response
+        new_messages = messages + [AIMessage(content=response.data)]
+        return {"messages": new_messages, "query_result": response.data}
         
     except Exception as e:
         print(f"Error executing agent: {e}")
         import traceback
         traceback.print_exc()
-        return [AIMessage(content=f"An error occurred: {str(e)}")]
+        error_message = f"An error occurred: {str(e)}"
+        return {"messages": messages + [AIMessage(content=error_message)], "query_result": error_message}
         
     finally:
         # Clean up resources
         await db_manager.close()
 
 # Create the graph
-def create_message_graph():
-    """Create and return a configured MessageGraph."""
-    # Initialize the graph
-    workflow = MessageGraph()
+def create_graph():
+    """Create and return a configured StateGraph with state management."""
+    workflow = StateGraph(State)
     
     # Add the agent node
     workflow.add_node("agent", agent_node)
@@ -80,19 +82,19 @@ def create_message_graph():
     # Set entry point (the start node)
     workflow.set_entry_point("agent")
     
-    # Set finish point (where execution stops)
-    workflow.set_finish_point("agent")
+    # Add an edge from the agent node to END
+    workflow.add_edge("agent", END)
     
     # Compile the graph
     return workflow.compile()
 
 # Function to run the graph
-async def run_message_graph(
+async def run_graph(
     user_input: str,
     previous_messages: Optional[List[Any]] = None
 ) -> Tuple[str, List[Any]]:
     """
-    Run the MessageGraph with the given user input and optional message history.
+    Run the StateGraph with the given user input and optional message history.
     
     Args:
         user_input: The user query
@@ -102,7 +104,7 @@ async def run_message_graph(
         Tuple of (agent_response, updated_messages)
     """
     # Create the graph
-    graph = create_message_graph()
+    graph = create_graph()
     
     # Initialize messages with previous messages or empty list
     messages = previous_messages or []
@@ -110,34 +112,15 @@ async def run_message_graph(
     # Add the current user message
     messages.append(HumanMessage(content=user_input))
     
-    # Run the graph with the messages
-    updated_messages = await graph.ainvoke(messages)
+    # Initialize the state
+    initial_state = {"messages": messages, "query_result": None}
+    
+    # Run the graph with the state
+    final_state = await graph.ainvoke(initial_state)
     
     # Get the latest AI message as the response
-    for msg in reversed(updated_messages):
-        if isinstance(msg, AIMessage):
-            response = msg.content
-            break
-    else:
-        response = "No response generated"
+    updated_messages = final_state["messages"]
+    query_result = final_state["query_result"]
     
     # Return both the response text and the updated messages
-    return response, updated_messages
-
-# Simple streaming version
-async def run_message_graph_stream(
-    user_input: str,
-    previous_messages: Optional[List[Any]] = None
-) -> Tuple[str, List[Any]]:
-    """
-    Run the MessageGraph with streaming output capability.
-    
-    Args:
-        user_input: The user query
-        previous_messages: Optional list of previous messages for context
-        
-    Returns:
-        Tuple of (agent_response, updated_messages)
-    """
-    # For now, just run the regular graph
-    return await run_message_graph(user_input, previous_messages)
+    return query_result or "No response generated", updated_messages
