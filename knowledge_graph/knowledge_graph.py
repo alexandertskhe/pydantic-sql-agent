@@ -4,7 +4,8 @@ import time
 import networkx as nx
 from typing import Dict, List, Optional, Any
 
-from tools.sqlite_db_tool import DatabaseManager, list_tables_names, describe_table
+from tools.sqlite_db_tool import list_tables_names, describe_table
+from utils.db_manager import DatabaseManager
 
 class DBKnowledgeGraph:
     """

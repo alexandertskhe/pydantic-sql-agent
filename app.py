@@ -5,7 +5,7 @@ from collections import deque
 import os
 
 from pydantic_agent import create_sql_agent, Dependencies
-from tools.sqlite_db_tool import DatabaseManager
+from utils.db_manager import DatabaseManager
 from knowledge_graph.knowledge_graph import DBKnowledgeGraph
 
 from dotenv import load_dotenv

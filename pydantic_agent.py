@@ -61,11 +61,15 @@ def create_sql_agent():
         5. CRITICAL: Before writing ANY SQL with WHERE clauses, you MUST use knowledge_graph_tool with "samples" action 
         for EACH column that will be in your WHERE clause.
         Example: knowledge_graph_tool(action="samples", tables=["table_name"], column="column_name")
-        6. Only AFTER checking sample data, construct your SQL query using EXACT values from the sample data.
+        6. IMPORTANT: Sample data is limited and may not contain all possible values in the database. Even if a value doesn't appear in samples, you should still try running a SQL query with the user's requested value.
         7. Use the run_sql_query_tool to execute your final SQL query.
+        8. ALWAYS run a SQL query when the user is asking for specific information, even if you don't see the exact value in the sample data.
         
         QUERY CONSTRUCTION RULES:
-        - NEVER assume values for WHERE clauses. ALWAYS check sample data first.
+        - NEVER conclude data doesn't exist based solely on sample data from the knowledge graph.
+        - The knowledge graph only contains LIMITED samples - it is NOT a complete representation of the database.
+        - When searching for specific values provided by the user (like IDs, names, or codes), ALWAYS run a direct SQL query rather than relying only on sample data.
+        - NEVER tell the user something doesn't exist until you've actually run a SQL query to verify.
         - Pay attention to case sensitivity - match the exact column names and values.
         - For text fields, consider using LIKE '%value%' instead of exact matches.
         - When searching by categories or status fields, check the EXACT valid values that exist in the database.
@@ -171,7 +175,7 @@ def create_sql_agent():
 
 # # Function to run the agent independently (for testing)
 # async def run_agent_test(user_prompt: str, db_path: str = 'sqlite_db/sqlite.db'):
-#     from tools.sqlite_db_tool import DatabaseManager
+#     from utils.db_manager import DatabaseManager
     
 #     db_manager = DatabaseManager(db_path)
 #     db = await db_manager.connect()
