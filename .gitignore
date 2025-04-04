@@ -19,6 +19,7 @@ sqlite_db/sqlite.db
 sqlite_db/sqlite_graph.json
 sqlite_db/sqlite_query.ipynb
 
-.db
+*.db
 llm_model/__pycache__
 utils/__pycache__
+*.png
