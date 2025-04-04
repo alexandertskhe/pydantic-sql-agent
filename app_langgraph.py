@@ -56,6 +56,7 @@ async def set_starters():
 
 @cl.on_message
 async def main(message: cl.Message):
+    global kg
     user_id = message.author
 
     # Create the empty message that we'll stream to
@@ -69,7 +70,8 @@ async def main(message: cl.Message):
         # Use the graph
         response, updated_messages = await run_graph(
             user_input=message.content,
-            previous_messages=previous_messages
+            previous_messages=previous_messages,
+            initialized_kg=kg
         )
         
         # Store the updated messages for next interaction
